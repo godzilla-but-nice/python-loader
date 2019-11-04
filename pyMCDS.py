@@ -27,8 +27,8 @@ class pyMCDS:
         Hierarchical container for all of the data retrieved by parsing the xml
         file and the files referenced therein.
     """
-    def __init__(self, xml_file, output_path='.'):
-        self.data = self._read_xml(xml_file, output_path)
+    def __init__(self, xml_file, output_path='.', load_microenv=True):
+        self.data = self._read_xml(xml_file, output_path, load_microenv)
 
     ## METADATA RELATED FUNCTIONS
 
@@ -316,7 +316,7 @@ class pyMCDS:
         vox_df = cell_df[inside_voxel]
         return vox_df
 
-    def _read_xml(self, xml_file, output_path='.'):
+    def _read_xml(self, xml_file, output_path='.', load_microenv=True):
         """
         Does the actual work of initializing MultiCellDS by parsing the xml
         """
@@ -393,72 +393,74 @@ class pyMCDS:
         # species will be primarily accessed through their names e.g.
         # MCDS['continuum_variables']['oxygen']['units']
         # MCDS['continuum_variables']['glucose']['data']
-        MCDS['continuum_variables'] = {}
-        variables_node = me_node.find('variables')
-        file_node = me_node.find('data').find('filename')
-
-        # micro environment data is shape [4+n, len(voxels)] where n is the number
-        # of species being tracked. the first 3 rows represent (x, y, z) of voxel
-        # centers. The fourth row contains the voxel volume. The 5th row and up will
-        # contain values for that species in that voxel.
-        me_file = file_node.text
-        me_path = output_path / me_file
-        # Changes here
-        try:
-            me_data = sio.loadmat(me_path)['multiscale_microenvironment']
-        except:
-            raise FileNotFoundError(
-                "No such file or directory:\n'{}' referenced in '{}'".format(me_path, xml_file))
-            sys.exit(1)
-
-        print('Reading {}'.format(me_path))
-
-        var_children = variables_node.findall('variable')
-
-        # we're going to need the linear x, y, and z coordinates later
-        # but we dont need to get them in the loop
-        X, Y, Z = np.unique(xx), np.unique(yy), np.unique(zz)
-
-        for si, species in enumerate(var_children):
-            species_name = species.get('name')
-            MCDS['continuum_variables'][species_name] = {}
-            MCDS['continuum_variables'][species_name]['units'] = species.get(
-                'units')
-
-            print('Parsing {:s} data'.format(species_name))
-
-            # initialize array for concentration data
-            MCDS['continuum_variables'][species_name]['data'] = np.zeros(xx.shape)
-
-            # travel down one level on tree
-            species = species.find('physical_parameter_set')
-
-            # diffusion data for each species
-            MCDS['continuum_variables'][species_name]['diffusion_coefficient'] = {}
-            MCDS['continuum_variables'][species_name]['diffusion_coefficient']['value'] \
-                = float(species.find('diffusion_coefficient').text)
-            MCDS['continuum_variables'][species_name]['diffusion_coefficient']['units'] \
-                = species.find('diffusion_coefficient').get('units')
-
-            # decay data for each species
-            MCDS['continuum_variables'][species_name]['decay_rate'] = {}
-            MCDS['continuum_variables'][species_name]['decay_rate']['value'] \
-                = float(species.find('decay_rate').text)
-            MCDS['continuum_variables'][species_name]['decay_rate']['units'] \
-                = species.find('decay_rate').get('units')
-
-            # store data from microenvironment file as numpy array            
-            # iterate over each voxel
-            for vox_idx in range(MCDS['mesh']['voxels']['centers'].shape[1]):
-                # find the center
-                center = MCDS['mesh']['voxels']['centers'][:, vox_idx]
-
-                i = np.where(np.abs(center[0] - X) < 1e-10)[0][0]
-                j = np.where(np.abs(center[1] - Y) < 1e-10)[0][0]
-                k = np.where(np.abs(center[2] - Z) < 1e-10)[0][0]
-
-                MCDS['continuum_variables'][species_name]['data'][j, i, k] \
-                    = me_data[4+si, vox_idx]
+        # This section takes time. We might not always want it.
+        if load_microenv:
+            MCDS['continuum_variables'] = {}
+            variables_node = me_node.find('variables')
+            file_node = me_node.find('data').find('filename')
+    
+            # micro environment data is shape [4+n, len(voxels)] where n is the number
+            # of species being tracked. the first 3 rows represent (x, y, z) of voxel
+            # centers. The fourth row contains the voxel volume. The 5th row and up will
+            # contain values for that species in that voxel.
+            me_file = file_node.text
+            me_path = output_path / me_file
+            # Changes here
+            try:
+                me_data = sio.loadmat(me_path)['multiscale_microenvironment']
+            except:
+                raise FileNotFoundError(
+                    "No such file or directory:\n'{}' referenced in '{}'".format(me_path, xml_file))
+                sys.exit(1)
+    
+            print('Reading {}'.format(me_path))
+    
+            var_children = variables_node.findall('variable')
+    
+            # we're going to need the linear x, y, and z coordinates later
+            # but we dont need to get them in the loop
+            X, Y, Z = np.unique(xx), np.unique(yy), np.unique(zz)
+    
+            for si, species in enumerate(var_children):
+                species_name = species.get('name')
+                MCDS['continuum_variables'][species_name] = {}
+                MCDS['continuum_variables'][species_name]['units'] = species.get(
+                    'units')
+    
+                print('Parsing {:s} data'.format(species_name))
+    
+                # initialize array for concentration data
+                MCDS['continuum_variables'][species_name]['data'] = np.zeros(xx.shape)
+    
+                # travel down one level on tree
+                species = species.find('physical_parameter_set')
+    
+                # diffusion data for each species
+                MCDS['continuum_variables'][species_name]['diffusion_coefficient'] = {}
+                MCDS['continuum_variables'][species_name]['diffusion_coefficient']['value'] \
+                    = float(species.find('diffusion_coefficient').text)
+                MCDS['continuum_variables'][species_name]['diffusion_coefficient']['units'] \
+                    = species.find('diffusion_coefficient').get('units')
+    
+                # decay data for each species
+                MCDS['continuum_variables'][species_name]['decay_rate'] = {}
+                MCDS['continuum_variables'][species_name]['decay_rate']['value'] \
+                    = float(species.find('decay_rate').text)
+                MCDS['continuum_variables'][species_name]['decay_rate']['units'] \
+                    = species.find('decay_rate').get('units')
+    
+                # store data from microenvironment file as numpy array            
+                # iterate over each voxel
+                for vox_idx in range(MCDS['mesh']['voxels']['centers'].shape[1]):
+                    # find the center
+                    center = MCDS['mesh']['voxels']['centers'][:, vox_idx]
+    
+                    i = np.where(np.abs(center[0] - X) < 1e-10)[0][0]
+                    j = np.where(np.abs(center[1] - Y) < 1e-10)[0][0]
+                    k = np.where(np.abs(center[2] - Z) < 1e-10)[0][0]
+    
+                    MCDS['continuum_variables'][species_name]['data'][j, i, k] \
+                        = me_data[4+si, vox_idx]
 
         # in order to get to the good stuff we have to pass through a few different
         # hierarchal levels
